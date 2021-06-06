@@ -199,25 +199,27 @@ func grabPG() []Func {
 	})
 
 	c.OnHTML("table[summary$=Functions] ", func(e *colly.HTMLElement) {
-		f := Func{Theme: e.Attr("summary")}
+		theme := e.Attr("summary")
 		e.ForEach("tr", func(_ int, tr *colly.HTMLElement) {
+			f := Func{Theme: theme}
 			tr.ForEach("td", func(i int, td *colly.HTMLElement) {
 				switch i {
 				case 0:
 					if name := td.ChildText("code[class=function]"); name != "" {
 						// Sometimes, it's a <code><code> intead of just <code>
 						// leading to doubled strings.
-						f.Name = name
+						f.Name = strings.TrimSpace(name)
 					} else {
-						f.Name = td.ChildText("code")
+						f.Name = strings.TrimSpace(td.ChildText("code"))
 					}
-				case 1:
-					f.Description = td.Text
+				case 2:
+					f.Description = strings.TrimSpace(td.Text)
 				}
 			})
+			if f.Name != "" {
+				funcs = append(funcs, f)
+			}
 		})
-
-		funcs = append(funcs, f)
 	})
 
 	c.OnRequest(func(r *colly.Request) {
