@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/gocolly/colly"
@@ -19,17 +20,86 @@ type Func struct {
 
 const pgDocsURL = "https://www.postgresql.org/docs/12/functions.html"
 const sqlitleDocsURL = "https://www.sqlite.org/lang_corefunc.html"
+const mysqlDocsURL = "https://dev.mysql.com/doc/refman/8.0/en/functions.html"
 
 func main() {
 	log.SetOutput(os.Stderr)
 	// funcs := grabPG()
-	funcs := grabSQLite()
+	// funcs := grabSQLite()
+	funcs := grabMySQL()
 	b, err := json.Marshal(funcs)
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println(string(b))
+}
+
+func grabMySQL() []Func {
+	funcs := []Func{}
+	c := colly.NewCollector()
+
+	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		if strings.Contains(e.Text, "Function") {
+			err := e.Request.Visit(e.Attr("href"))
+			if err != nil {
+				if errors.Is(err, colly.ErrAlreadyVisited) {
+					return
+				}
+
+				if errors.Is(err, colly.ErrMissingURL) {
+					return
+				}
+
+				panic(err)
+			}
+		}
+	})
+
+	var theme string
+	c.OnHTML(".titlepage", func(e *colly.HTMLElement) {
+		numR := regexp.MustCompile(`((?:\d+\.?)+)`)
+		theme = strings.TrimSpace(numR.ReplaceAllString(e.Text, ""))
+	})
+
+	c.OnHTML("tbody tr", func(e *colly.HTMLElement) {
+		f := Func{Theme: theme}
+		skip := false
+		e.ForEachWithBreak("td", func(i int, td *colly.HTMLElement) bool {
+			switch i {
+			case 0:
+				if strings.HasSuffix(td.Text, ")") {
+					// Only crawl functions.
+					f.Name = td.Text
+				} else {
+					// That's a statement, not a function.
+					skip = true
+					return false
+				}
+			case 1:
+				f.Description = strings.TrimSpace(td.Text)
+			}
+			return true
+		})
+		if !skip {
+			funcs = append(funcs, f)
+		}
+	})
+
+	c.OnRequest(func(r *colly.Request) {
+		if !strings.Contains(r.URL.String(), "8") {
+			r.Abort()
+		}
+		log.Println("Visiting", r.URL)
+	})
+
+	err := c.Visit(mysqlDocsURL)
+	// err := c.Visit("https://dev.mysql.com/doc/refman/8.0/en/loadable-function-reference.html")
+	if err != nil {
+		panic(err)
+	}
+
+	return funcs
 }
 
 func grabSQLite() []Func {
