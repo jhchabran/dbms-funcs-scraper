@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gocolly/colly"
 )
@@ -24,10 +25,31 @@ const mysqlDocsURL = "https://dev.mysql.com/doc/refman/8.0/en/functions.html"
 
 func main() {
 	log.SetOutput(os.Stderr)
-	// funcs := grabPG()
-	// funcs := grabSQLite()
-	funcs := grabMySQL()
-	b, err := json.Marshal(funcs)
+	output := struct {
+		Postgres []Func
+		SQLite   []Func
+		Mysql    []Func
+	}{}
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		output.Postgres = grabPG()
+	}()
+
+	go func() {
+		defer wg.Done()
+		output.SQLite = grabSQLite()
+	}()
+	go func() {
+		defer wg.Done()
+		output.Mysql = grabMySQL()
+	}()
+
+	wg.Wait()
+
+	b, err := json.Marshal(output)
 	if err != nil {
 		panic(err)
 	}
@@ -189,7 +211,6 @@ func grabPG() []Func {
 					} else {
 						f.Name = td.ChildText("code")
 					}
-					log.Println(f.Name)
 				case 1:
 					f.Description = td.Text
 				}
