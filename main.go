@@ -17,11 +17,80 @@ type Func struct {
 	Theme       string
 }
 
-const pgdocUrl = "https://www.postgresql.org/docs/12/functions.html"
+const pgDocsURL = "https://www.postgresql.org/docs/12/functions.html"
+const sqlitleDocsURL = "https://www.sqlite.org/lang_corefunc.html"
+
+func main() {
+	log.SetOutput(os.Stderr)
+	// funcs := grabPG()
+	funcs := grabSQLite()
+	b, err := json.Marshal(funcs)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(string(b))
+}
+
+func grabSQLite() []Func {
+	funcs := []Func{}
+	c := colly.NewCollector()
+
+	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		if strings.Contains(e.Text, "functions") {
+			err := e.Request.Visit(e.Attr("href"))
+			if err != nil {
+				if errors.Is(err, colly.ErrAlreadyVisited) {
+					return
+				}
+
+				if errors.Is(err, colly.ErrMissingURL) {
+					return
+				}
+
+				panic(err)
+			}
+		}
+	})
+
+	c.OnHTML("h1+dl", func(e *colly.HTMLElement) {
+		theme := e.DOM.Prev().Text()
+		theme = strings.TrimPrefix(theme[2:], " Descriptions of ")
+		var f *Func
+		e.ForEach("dt,dd", func(_ int, d *colly.HTMLElement) {
+			switch d.Name {
+			case "dt":
+				// <dt> tag holds the function name.
+				f = &Func{Theme: theme}
+				f.Name = d.Text
+				// In some cases, <dt> contains two func names, separated by a <br>.
+				// When Text is called on these, the two func names will end up as:
+				// "foo()bar(), so we need to adjust that.
+				f.Name = strings.ReplaceAll(d.Text, ")", ") ")
+				f.Name = strings.TrimSpace(f.Name)
+			case "dd":
+				// <dd> tag holds the description.
+				f.Description = strings.TrimSpace(d.Text)
+				funcs = append(funcs, *f)
+				f = nil
+			}
+		})
+	})
+
+	c.OnRequest(func(r *colly.Request) {
+		log.Println("Visiting", r.URL)
+	})
+
+	err := c.Visit(sqlitleDocsURL)
+	if err != nil {
+		panic(err)
+	}
+
+	return funcs
+}
 
 func grabPG() []Func {
 	funcs := []Func{}
-
 	c := colly.NewCollector()
 
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
@@ -64,21 +133,10 @@ func grabPG() []Func {
 		log.Println("Visiting", r.URL)
 	})
 
-	err := c.Visit(pgdocUrl)
+	err := c.Visit(pgDocsURL)
 	if err != nil {
 		panic(err)
 	}
 
 	return funcs
-}
-
-func main() {
-	log.SetOutput(os.Stderr)
-	funcs := grabPG()
-	b, err := json.Marshal(funcs)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(string(b))
 }
